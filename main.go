@@ -6,7 +6,13 @@ import (
 	"fmt"
 	"io/ioutil"
 	"os"
+	"sort"
 	"path/filepath"
+	"github.com/blang/semver"
+)
+
+var (
+	DEFAULT_VER = "3.0.0"
 )
 
 type Error struct {
@@ -48,12 +54,24 @@ func main() {
 
 	flag.Parse()
 
-	for _, input := range flag.Args() {
+	inputs := flag.Args()
+	if len(inputs) == 0 {
+		fmt.Fprintf(os.Stderr, "checkstyle_merger needs at least one input")
+		os.Exit(1)
+	}
+
+	var vers []semver.Version
+
+	for _, input := range inputs {
 		data, err := ioutil.ReadFile(input)
 		check(err, input)
 		parsed := CheckStyle{}
 		err = xml.Unmarshal(data, &parsed)
 		check(err, input)
+		ver, err := semver.Make(parsed.Version)
+		if err == nil {
+			vers = append(vers, ver)
+		}
 		for _, file := range parsed.Files {
 			if relativeBase != "" && filepath.IsAbs(file.Name) {
 				file.Name, _ = filepath.Rel(relativeBase, file.Name)
@@ -61,6 +79,20 @@ func main() {
 			result.Files = append(result.Files, file)
 		}
 	}
+
+	sort.Slice(vers, func(i, j int) bool {
+		return vers[i].GT(vers[j])
+	})
+
+	var ver semver.Version
+	if len(vers) == 0 {
+		fmt.Fprintf(os.Stderr, "There is no valid version. use checkstyl_merger default value %q", DEFAULT_VER)
+		ver, _ = semver.Make(DEFAULT_VER)
+	} else {
+		ver = vers[0]
+	}
+
+	result.Version = ver.String()
 
 	out, err := xml.Marshal(result)
 	check(err, "out")

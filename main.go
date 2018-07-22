@@ -1,43 +1,36 @@
+//+build !test
+
 package main
 
 import (
-	"encoding/xml"
+ 	"encoding/xml"
 	"flag"
 	"fmt"
 	"io/ioutil"
 	"os"
-	"sort"
 	"path/filepath"
 	"github.com/blang/semver"
 )
-
-var (
-	DEFAULT_VER = "3.0.0"
-)
-
-type Error struct {
-	Line     int32  `xml:"line,attr"`
-	Column   int32  `xml:"column,attr"`
-	Severity string `xml:"severity,attr"`
-	Message  string `xml:"message,attr"`
-	Source   string `xml:"source,attr"`
-}
-
-type File struct {
-	Name   string  `xml:"name,attr"`
-	Errors []Error `xml:"error"`
-}
-
-type CheckStyle struct {
-	XMLName xml.Name `xml:"checkstyle"`
-	Version string   `xml:"version,attr"`
-	Files   []File   `xml:"file"`
-}
 
 func check(e error, i string) {
 	if e != nil {
 		fmt.Println(i)
 		panic(e)
+	}
+}
+
+func parseInput(path string) (CheckStyle, *semver.Version) {
+	data, err := ioutil.ReadFile(path)
+	check(err, path)
+	parsed := CheckStyle{}
+	err = xml.Unmarshal(data, &parsed)
+	check(err, path)
+	ver, err := semver.Make(parsed.Version)
+
+	if err == nil {
+		return parsed, &ver
+	} else {
+		return parsed, nil
 	}
 }
 
@@ -52,6 +45,14 @@ func main() {
 		relativeBase, _ = os.Getwd()
 	}
 
+	var modifier func(file *File)
+
+	if relativeBase != "" {
+		modifier = makeRelativeModifier(relativeBase)
+	} else {
+		modifier = emptyModifier
+	}
+
 	flag.Parse()
 
 	inputs := flag.Args()
@@ -63,33 +64,19 @@ func main() {
 	var vers []semver.Version
 
 	for _, input := range inputs {
-		data, err := ioutil.ReadFile(input)
-		check(err, input)
-		parsed := CheckStyle{}
-		err = xml.Unmarshal(data, &parsed)
-		check(err, input)
-		ver, err := semver.Make(parsed.Version)
-		if err == nil {
-			vers = append(vers, ver)
+		parsed, ver := parseInput(input)
+		if ver != nil {
+			vers = append(vers, *ver)
 		}
-		for _, file := range parsed.Files {
-			if relativeBase != "" && filepath.IsAbs(file.Name) {
-				file.Name, _ = filepath.Rel(relativeBase, file.Name)
-			}
-			result.Files = append(result.Files, file)
-		}
+
+		mergeData(parsed, &result, modifier)
 	}
 
-	sort.Slice(vers, func(i, j int) bool {
-		return vers[i].GT(vers[j])
-	})
+	sortCheckStyle(&result)
 
-	var ver semver.Version
-	if len(vers) == 0 {
-		fmt.Fprintf(os.Stderr, "There is no valid version. use checkstyl_merger default value %q", DEFAULT_VER)
-		ver, _ = semver.Make(DEFAULT_VER)
-	} else {
-		ver = vers[0]
+	ver, w := getProperVersion(vers)
+	if w != nil {
+		fmt.Fprintf(os.Stderr, "%q", w)
 	}
 
 	result.Version = ver.String()

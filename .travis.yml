@@ -1,0 +1,15 @@
+language: go
+
+go:
+  - "1.8"
+  - "1.9"
+  - "1.10"
+
+install:
+  - go get -t ./...
+  - go get golang.org/x/tools/cover
+  - go get github.com/mattn/goveralls
+
+script:
+  - go test -v -cover -tags test -covermode=count -coverprofile=coverage.out
+  - $(go env GOPATH | awk 'BEGIN{FS=":"} {print $1}')/bin/goveralls -coverprofile=coverage.out -service=travis-ci -repotoken $COVERALLS_TOKEN
